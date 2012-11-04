@@ -1,0 +1,113 @@
+#include "uart.h"
+//#include "iocompat.h"
+
+// shortcuts for turning things on/off
+#define LED_ON(x) PORTB |= _BV(x)
+#define LED_OFF(x) PORTB &= ~_BV(x)
+#define ALL_OFF() PORTB = 0;
+#define ALL_ON() PORTB = -1;
+
+/*char debug[128];*/
+/*
+#define MAX_COMMAND_SIZE	32
+char command[MAX_COMMAND_SIZE];
+void processCommand();
+
+#define LED_COUNT	6
+struct LED_INFO
+{
+};
+struct LED_INFO info[LED_COUNT];
+
+ISR (TIMER1_OVF_vect)
+{
+}
+*/
+
+int main (void)
+{
+	DDRB = 0xff;
+	PORTB = 0x00;
+
+	initUart(9600, 0);
+
+	printf("fucker:\n");
+	printf("work or don't\n");
+
+	uint16_t count = 0;
+	char buffer[128];
+	while(1)
+	{
+		char c = getchar();
+		LED_ON(0);
+
+		sprintf(buffer, "%d: got %c (0x%x)\n", count++, c, c);
+		printf(buffer);
+
+		LED_OFF(0);
+	}
+//	DDRB = 0xff;
+//	PORTB = 0;
+//
+//	initUart(9600, 0);
+//
+//	// initialize the 16-bit timer
+///*	TCCR1A = _BV(COM1A1);
+//	TCCR1B |= TIMER1_CLOCKSOURCE;
+//	TIMSK = _BV (TOIE1); */
+//
+////	memset(info, 0, sizeof(struct LED_INFO) * LED_COUNT);
+//
+//	LED_ON(0);
+//	sleep(100);
+//
+//	printf("argh\n");
+//
+//	LED_ON(2);
+//	sleep(100);
+//
+//	uint16_t beep = 0;
+///*	sei ();*/
+//	while(1)
+//	{
+//		sprintf(debug, "now: %d\n", beep++);
+//		printf(debug);
+//		LED_ON(3);
+//		sleep(100);
+//		LED_OFF(3);
+//		sleep(1000);
+////		if(UCSRA & (1 << RXC))
+////			processCommand();
+//	}
+	
+	return 0;
+}
+
+/*
+void processCommand()
+{
+	cli();
+	ALL_OFF();
+
+	uint8_t length = readLine(command, MAX_COMMAND_SIZE);
+	command[length] = '\0';
+
+	sprintf(buffer, "got: %d\n", length);
+	printf(buffer);
+	printf(command);
+	printf("\n");
+
+	ALL_ON();
+	sleep(1000);
+	ALL_OFF();
+	uint8_t i;
+	for(i = 0; i < LED_COUNT; i++)
+	{
+		LED_ON(i);
+		sleep(100);
+		LED_OFF(i);
+	}
+	sei();
+}
+*/
+

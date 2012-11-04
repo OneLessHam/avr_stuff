@@ -1,0 +1,227 @@
+#include "uart.h"
+#include "iocompat.h"
+
+// shortcuts for turning things on/off
+#define LED_ON(x) PORTB |= _BV(x)
+#define LED_OFF(x) PORTB &= ~_BV(x)
+#define ALL_OFF() PORTB = 0;
+#define ALL_ON() PORTB = -1;
+
+/**
+ * Basic command syntax is:
+ * <leds>:<command>[:<options>]
+ * <leds> can be:
+ * 	a list of led  indexes ('4', '135')
+ * 	a range ('1-3')
+ * <commands> can be:
+ *    f: turn led off
+ *    o: turn led on
+ *    l:<level> set led level 
+ *    p:<level> pulse up and down to level
+ */
+#define MAX_COMMAND_SIZE	32
+char input[MAX_COMMAND_SIZE];
+void processCommand();
+char buffer[128];
+
+#define LED_COUNT	6
+
+#define LED_MODE_OFF 			0
+#define LED_MODE_ON				1
+#define LED_MODE_DIM				2
+#define LED_MODE_PULSE_UP		3
+#define LED_MODE_PULSE_DOWN	4
+
+#define MAX_FLAGS 2
+struct LED_INFO
+{
+	uint8_t mode;
+	uint8_t flags[MAX_FLAGS];
+};
+struct LED_INFO ledInfo[LED_COUNT];
+
+ISR (TIMER1_OVF_vect)
+{
+	uint8_t fixed = 0;
+	uint8_t process = 0;
+	uint8_t index;
+	for(index = 0; index < LED_COUNT; index++)
+	{
+		struct LED_INFO* p = &ledInfo[index];
+		if(p->mode == LED_MODE_ON)
+			fixed |= _BV(index);
+		else if(p->mode >= LED_MODE_DIM)
+			process |= _BV(index);
+	}
+
+	PORTB = (fixed | process);
+
+	uint8_t step = 0;
+	while(process != 0)
+	{
+		for(index = 0; index < LED_COUNT; index++)
+		{
+			struct LED_INFO* p = &ledInfo[index];
+			if((p->mode >= LED_MODE_DIM) && (step >= p->flags[0]))
+			{
+				process &= ~_BV(index);
+
+				// pick next step for pulse
+				if(p->mode == LED_MODE_PULSE_UP)
+				{
+					if(p->flags[0] < p->flags[1])
+						p->flags[0]++;
+					else
+						p->mode = LED_MODE_PULSE_DOWN;
+				}
+				else if(p->mode == LED_MODE_PULSE_DOWN)
+				{
+					if(p->flags[0] > 0)
+						p->flags[0]--;
+					else
+						p->mode = LED_MODE_PULSE_UP;
+
+				}
+			}
+		}
+
+		PORTB = (fixed | process);
+		step++;
+	}
+}
+
+int main (void)
+{
+	DDRB = 0xff;
+	PORTB = 0;
+
+	initUart(9600, 0);
+
+	// initialize the 16-bit timer
+	TCCR1A = _BV(COM1A1);
+	TCCR1B |= TIMER1_CLOCKSOURCE;
+	TIMSK = _BV (TOIE1); 
+
+	memset(ledInfo, 0, sizeof(struct LED_INFO) * LED_COUNT);
+
+	// temp
+	ledInfo[2].mode = LED_MODE_DIM;
+	ledInfo[2].flags[0] = 1;
+	ledInfo[3].mode = LED_MODE_PULSE_UP;
+	ledInfo[3].flags[1] = 50;
+
+	uint16_t beep = 0;
+	sei ();
+	while(1)
+	{
+		if(UCSRA & (1 << RXC))
+			processCommand();
+	}
+	
+	return 0;
+}
+
+void processCommand()
+{
+	cli();
+	ALL_OFF();
+
+
+	uint8_t length = readLine(input, MAX_COMMAND_SIZE);
+	if(length == 0)
+		return;
+	input[length] = '\0';
+
+	uint8_t pos = 0;
+	while(pos < length)
+	{
+		// first figure out which LEDs to affect
+		uint8_t index;
+		uint8_t leds = 0;
+		uint8_t last = 0;
+		uint8_t options[MAX_FLAGS];
+		memset(options, 0, MAX_FLAGS);
+		for( ; ((pos < length) && (input[pos] != ':')); pos++ )
+		{
+			// use options[0] to mark ranges
+			if(input[pos] == '-')
+				options[0] = 1;
+			else
+			{
+				uint8_t test = input[pos] - 0x30;
+				if(test >= LED_COUNT)
+					return;
+
+				if(options[0])
+				{
+					for(index = last + 1; index <= test; index++)
+						leds |= 1 << index;
+					options[0] = 0;
+				}
+				else
+					leds |= 1 << test;
+
+				last = test;
+			}
+		}
+
+		// bail if no leds specified or no command follows
+		if((leds == 0) || (++pos >= length))
+			return;
+
+		// next character is the command
+		char command = input[pos++]; 
+
+		// read the options
+		memset(options, 0, MAX_FLAGS);
+		last = 0;
+		for( ; ((pos < length) && (input[pos] != ';')); pos++ )
+		{
+			uint8_t test = input[pos];
+			switch(input[pos])
+			{
+				case ':':
+				case ',':
+					if(pos < (length - 1))
+						sscanf(&input[pos + 1], "%d", &options[last++]);
+					break;
+			}
+		}
+		pos++;
+
+		// now apply the command to the specified leds
+		for(index = 0; index < LED_COUNT; index++)
+		{
+			struct LED_INFO* p = &ledInfo[index];
+			if(!(leds & _BV(index)))
+				continue;
+
+			switch(command)
+			{
+				case 'f':
+					p->mode = LED_MODE_OFF;
+					break;
+
+				case 'o':
+					p->mode = LED_MODE_ON;
+					break;
+
+				case 'l':
+					p->mode = LED_MODE_DIM;
+					p->flags[0] = options[0];
+					break;
+
+				case 'p':
+					p->mode = LED_MODE_PULSE_UP;
+					p->flags[0] = 0;
+					p->flags[1] = options[0];
+					break;
+			}
+		}
+	}
+
+	ALL_OFF();
+
+	sei();
+}
+
